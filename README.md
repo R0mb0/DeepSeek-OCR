@@ -8,6 +8,13 @@
 </div>
 
 
+<div align="center">
+  
+  # [👉 Reed my experience 👈](./My_experience.md)
+  
+</div>
+
+
 <hr>
 <div align="center">
   <a href="https://www.deepseek.com/" target="_blank">
