@@ -169,7 +169,7 @@ def draw_bounding_boxes(image, refs):
 
 # -------------------------
 # Async generation helpers
-# -------------------------
+#---------
 async def generate_for_image(engine, pil_image, prompt, request_id=None):
     """
     Tokenize the PIL image AFTER the engine is created and then stream generate.
@@ -232,8 +232,9 @@ async def main_async(image_paths):
         trust_remote_code=True,
         tensor_parallel_size=1,
         # Conservative GPU settings to reduce OOM on small GPUs:
-        gpu_memory_utilization=0.2,  # reduce VRAM footprint on GPU
+        gpu_memory_utilization=0.12,  # reduce VRAM footprint on GPU
         swap_space=8,                # 8 GiB swap to host (vllm expects GiB)
+        quantization="bitsandbytes",  # request bitsandbytes by name (string form)
         skip_tokenizer_init=True,    # important to avoid tokenizer init inside engine core
     )
 
