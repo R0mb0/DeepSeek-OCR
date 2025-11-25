@@ -1,4 +1,4 @@
-# ⚙️ DeepSeek‑OCR: Technical Community Summary (final, English, emoji‑friendly)
+# ⚙️ DeepSeek‑OCR: Technical Community Summary
 
 A compact, technical and shareable summary of the work performed to run DeepSeek‑OCR locally (diagnostics, fixes, and practical next steps).
 
