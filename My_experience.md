@@ -1,193 +1,193 @@
-# ⚙️ DeepSeek‑OCR: Technical Community Summary (English, emoji‑friendly)
+# ⚙️ DeepSeek‑OCR: Technical Community Summary (final, English, emoji‑friendly)
 
-A compact, technical and shareable summary of the work performed to run DeepSeek‑OCR locally.
+A compact, technical and shareable summary of the work performed to run DeepSeek‑OCR locally (diagnostics, fixes, and practical next steps).
 
 ---
 
 ## 🚀 Quick overview
-- Goal: Run DeepSeek‑OCR (multimodal model) locally with GPU acceleration.
-- Key constraints: laptop GPU (~6 GiB VRAM), modern NVIDIA driver supporting CUDA 12/13.
-- Main issues encountered: package manager/library ABI conflicts, tokenizer + fork/thread init races, and GPU OOM when loading the model.
-- Current state: working PyTorch + CUDA environment; code patched to reduce memory footprint and avoid deadlocks; model still hits OOM on 6 GiB GPU in the most memory‑heavy phases (packing/flattening tensors). Options: more aggressive spilling, 8‑bit quantization, or larger GPU.
+- Goal: run DeepSeek‑OCR (multimodal OCR) locally using the laptop GPU.
+- Constraint: NVIDIA GeForce RTX 3060 Laptop GPU (~6 GiB VRAM).
+- Main problems encountered:
+  - package manager / C++ ABI conflicts (mamba / libmamba segfaults),
+  - tokenizer + fork/thread init races (deadlocks),
+  - tqdm/huggingface_hub compatibility (TypeError via tqdm.asyncio),
+  - vllm / PyTorch OOM when loading large multimodal model.
+- Current state: reproducible Conda env (Python 3.12) with PyTorch + CUDA 13 (installed via pip wheels), multiple launcher patches to avoid deadlocks and reduce footprint, monkeypatch to avoid tqdm.asyncio bug, diagnostics tooling added. Model still hits OOM on 6 GiB GPU in the heaviest phases unless quantized / run on a larger GPU.
 
 ---
 
-## 🖥️ Hardware & OS (anonymous, technical)
-- GPU: NVIDIA GeForce RTX 3060 (Laptop) — ~6 GiB VRAM.
-- NVIDIA driver: recent (compatible with CUDA 12/13 runtimes).
-- Host OS: Linux (typical distro with conda/Anaconda available).
-- RAM: typical laptop class (≥16 GiB recommended if planning to spill to host).
+## 🖥️ Hardware & OS (technical)
+- GPU: NVIDIA GeForce RTX 3060 (Laptop) — ≈6 GiB VRAM.
+- Driver: up to date for CUDA 12/13 runtimes.
+- OS: Linux (Anaconda/conda available).
+- RAM: laptop class (≥16 GiB recommended for substantial host spill).
 
 ---
 
-## 🧰 Environment preparation (what was done)
-1. Created an isolated Conda environment (Python 3.12) and used pip wheels for exact PyTorch/CUDA:
-   - Create env:
-     - conda create -n torch13 python=3.12 pip -y
-   - Install PyTorch CUDA builds (official PyTorch index):
-     - python -m pip install --index-url https://download.pytorch.org/whl/cu130 \
-         torch torchvision torchaudio
+## 🧰 Environment preparation — what was done
+1. Created conda env (python 3.12) and used PyTorch official wheels for CUDA 13:
+   - conda create -n torch13 python=3.12 pip -y
+   - python -m pip install --index-url https://download.pytorch.org/whl/cu130 torch torchvision torchaudio
 
-2. Verified GPU access with PyTorch:
-```python
+2. Verified GPU access with:
+```py
 import torch
 print(torch.__version__, torch.version.cuda)
 print("CUDA available:", torch.cuda.is_available())
-print("GPU:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "n/a")
+if torch.cuda.is_available():
+    print(torch.cuda.get_device_name(0))
 ```
 
-3. Exported key environment variables _before_ importing tokenizers / CUDA libraries:
+3. Ensured critical environment variables are exported before importing tokenizers/torch/vllm:
 ```bash
 export TOKENIZERS_PARALLELISM=false
-export VLLM_USE_V1=1          # keep consistent with AsyncLLMEngine v1
+export VLLM_USE_V1=1
 export CUDA_VISIBLE_DEVICES=0
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:64"
 ```
 
 ---
 
-## 🐛 Problems encountered (concise)
-1. mamba / libmamba segmentation faults during package resolution — caused by library ABI mismatch (libstdc++ / GLIBCXX) and duplicated/incompatible package files in the conda cache.  
-2. Tokenizer / threads deadlock risk: some modules create threads on import; using fork() with threads can deadlock.  
-3. vllm / PyTorch OOM during model initialization: large contiguous allocation (~100–200 MiB) fails while ~5 GiB is already allocated/reserved — model is too large for 6 GiB GPU without quantization or spilling.
+## 🐛 Problems encountered (concise recap)
+1. mamba / libmamba segmentation faults (package resolution) due to ABI mismatch (libstdc++) and duplicated/incompatible pkgs in conda cache.  
+2. Tokenizer/fork+thread deadlocks (some modules create threads on import; fork + threads can deadlock).  
+3. tqdm.asyncio mismatch: huggingface_hub/snapshot_download used tqdm.asyncio incorrectly in our environment leading to TypeError.  
+4. vllm / PyTorch OOMs: heavy contiguous allocations during model load (packing/flatten) exceed 6 GiB.
 
 ---
 
-## 🔧 How problems were solved — logical fixes & notable code snippets
+## 🔧 Fixes applied (what to keep in repo)
 
-### 1) mamba / libmamba ABI conflicts
-- Approach: clean package cache and align libstdc++ to conda‑forge release.
-- Commands (conceptual, adapt to your environment):
-```bash
-# Backup problematic packages
-mkdir -p ~/conda-pkgs-backup
-# Move problematic libmamba/mamba packages out of the cache, then:
-conda remove -n base mamba libmamba libmambapy conda-libmamba-solver -y
-conda clean --all -y
-conda install -n base -c conda-forge libstdcxx-ng -y
-conda install -n base -c conda-forge mamba -y
-```
-- Rationale: ensures the runtime C++ ABI used by conda tooling matches the installed system libraries.
+### A — mamba / libstdc++ stability
+- Actions:
+  - Backup & remove problematic pkgs; clean conda caches.
+  - Align libstdc++ from conda-forge:
+    - conda remove -n base mamba libmamba libmambapy conda-libmamba-solver -y
+    - conda clean --all -y
+    - conda install -n base -c conda-forge libstdcxx-ng -y
+    - conda install -n base -c conda-forge mamba -y
+- Rationale: fix segfaults caused by mismatched shared libraries.
 
----
-
-### 2) Avoiding tokenizer fork+thread deadlocks
-- Strategy: set environment variables BEFORE importing tokenizers/torch and use spawn start method for multiprocessing when needed.
-- Example snippet to put at top of launcher scripts (very early):
+### B — Avoid tokenizer + fork deadlocks
+- Launcher pattern (applied in patched launchers):
+  - Set env vars before ANY heavy import.
+  - Force multiprocessing start method to spawn:
 ```python
-import os
+import os, multiprocessing
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ['VLLM_USE_V1'] = os.environ.get('VLLM_USE_V1', '1')
-os.environ['CUDA_VISIBLE_DEVICES'] = os.environ.get('CUDA_VISIBLE_DEVICES', '0')
-
-import multiprocessing
+os.environ['VLLM_USE_V1'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 multiprocessing.set_start_method('spawn', force=True)
 ```
-- Also: defer tokenizer initialization when possible (avoid eager tokenizer creation in imported modules).
+- Defer tokenizer init where possible (use skip_tokenizer_init in vllm engine args).
 
----
+Files updated with this pattern: run_one_debug_skip_tokenizer.py, run_dpsk_ocr_image.py, run_dpsk_ocr_eval_batch.py, run_dpsk_ocr_pdf.py.
 
-### 3) Reducing GPU footprint / enabling spill to host (vllm)
-- vllm supports controlling how much state stays on GPU and an explicit swap space on host (value in GiB).
-- Conservative engine args used to attempt to load the model on small GPUs:
+### C — tqdm.asyncio incompatibility (quick, robust fix)
+- Problem: huggingface_hub snapshot_download called tqdm_class which resolved to tqdm.asyncio.tqdm_asyncio, and the constructor received duplicate `disable` kwarg (TypeError).
+- Fix applied (two parts):
+  1. A small wrapper and monkeypatch for local runs:
+     - run_with_tqdm_patch.py — applies runtime monkeypatch (tqdm.asyncio.tqdm_asyncio -> tqdm.tqdm) and then runs target script.
+  2. A sitewide, child-process visible patch: sitecustomize.py placed in repo root and ensured by adding repo root to PYTHONPATH. sitecustomize executes at every Python interpreter start, ensuring the monkeypatch applies also inside vllm EngineCore subprocesses (child interpreters).
+- Why: vllm spawns child processes; patch must be visible in child interpreters — sitecustomize is the correct place.
+
+### D — Conservative vllm / launcher settings (reduce VRAM footprint)
+- Example conservative args used in patched launchers:
 ```python
-from vllm.engine.arg_utils import AsyncEngineArgs
-
 engine_args = AsyncEngineArgs(
     model=MODEL_PATH,
-    hf_overrides={"architectures": ["DeepseekOCRForCausalLM"]},
     block_size=256,
     max_model_len=8192,
     tensor_parallel_size=1,
-    gpu_memory_utilization=0.05,  # very small GPU retention
-    swap_space=12,                # GiB of host spill space
+    gpu_memory_utilization=0.05,  # very low on GPU
+    swap_space=12,                # GiB host spill
     skip_tokenizer_init=True,
 )
 ```
-- Also reduced visual processing concurrency:
-```python
-# config.py conservative values
-MAX_CROPS = 1
-MAX_CONCURRENCY = 1
-NUM_WORKERS = 1
-```
-- Note: swap_space is in GiB and uses host RAM/SSD; it reduces OOM risk but makes load & inference much slower.
+- config.py: lowered defaults used by launchers:
+  - MIN_CROPS=1, MAX_CROPS reduced (e.g. 1–4)
+  - MAX_CONCURRENCY = 1..4 conservative
+  - NUM_WORKERS lowered
+- Rationale: avoid immediate large allocations; allow vllm to spill tensors to host.
+
+### E — Diagnostics & helper scripts added
+- gather_vllm_diagnostics.sh — collects nvidia-smi, ps, lsof, /proc info, strace (short), gdb backtrace, py-spy (if present) and archives to /tmp.
+- test_vllm_gpt2.py — small test script to validate vllm engine on small model (gpt2) to separate infra issues from heavy model issues.
+- run_with_tqdm_patch.py and sitecustomize.py (described above).
 
 ---
 
-### 4) Quantization (recommended for 6 GiB GPUs)
-- Best long‑term solution: load model weights quantized to 8‑bit (bitsandbytes). Typical VRAM reduction: ~2–4×.
-- Rough steps:
-  - pip install bitsandbytes (ensure compatibility with your CUDA runtime)
-  - configure vllm/loader with a quantization config (if supported), e.g.:
-```python
-from vllm.model_executor.layers.quantization import QuantizationConfig
-
-engine_args.quantization = QuantizationConfig(bits=8)
-```
-- If vllm doesn't expose that path for your version, use transformers + bitsandbytes device_map/load_in_8bit approaches, then adapt to vllm or run inference with transformers directly.
+## 🔬 Diagnostics observations
+- strace on EngineCore showed many threads in futex / epoll_wait: engine was waiting on IPC before fix; after tqdm patch the engine advanced further into model load.
+- lsof showed vllm / torch shared libs loaded and GPU device file descriptors open.
+- The final blocking point observed repeatedly: heavy weight load & tensor packing (vllm model loader) triggered large contiguous allocations that exceeded available VRAM → OutOfMemoryError inside the vllm worker.
 
 ---
 
-## ✅ Current status (where I stand)
-- Environment: Conda env with Python 3.12 and PyTorch wheel built for CUDA 13 installed via pip. PyTorch detects GPU successfully.
-- Code: launchers patched to:
-  - set env vars before imports,
-  - use spawn start method,
-  - defer tokenizer init (skip_tokenizer_init when creating vllm engine),
-  - lower gpu_memory_utilization and add swap_space values for host spill.
-- Outcome: vllm engine initializes further than before but still throws OOM on 6 GiB GPU during heavy tensor packing steps.
-- Workable fallbacks:
-  - Aggressive spilling (very slow) — may or may not succeed depending on host RAM and fragmentation patterns.
-  - 8‑bit quantization (preferred) — requires bitsandbytes + loader adjustments.
-  - Run on a larger GPU in cloud / remote machine (most straightforward to get full performance).
+## 📦 Quantization & recommended next steps (practical)
+1. Best long‑term local solution on 6 GiB: quantize weights to 8‑bit (bitsandbytes). Typical VRAM reduction ~2–4×.
+   - pip install bitsandbytes (choose compatible version for your CUDA runtime).
+   - Integrate quantization with loader / vllm, e.g. set engine_args.quantization = QuantizationConfig(bits=8) if your vllm supports it, or load via transformers with load_in_8bit/device_map then adapt to vllm.
+2. If quantization is not feasible: use a GPU with ≥12–24 GiB VRAM (cloud or remote machine).
+3. For further local attempts: try extremely conservative settings (gpu_memory_utilization=0.01, swap_space=16 GiB, MAX_CROPS=1, MAX_CONCURRENCY=1) — may be extremely slow and still fail, but useful to test end‑to‑end flow.
+4. Pre‑download model snapshot locally (huggingface snapshot_download) to avoid time/IO spikes during child process startup.
 
 ---
 
-## 💡 Recommendations & next steps
-1. Quick try: set gpu_memory_utilization = 0.05 and swap_space = 12 GiB, then run while monitoring `nvidia-smi`. This may allow model to load (slow).
-2. Best practical solution for 6 GiB: enable 8‑bit quantization (install bitsandbytes and adapt loader). I can prepare exact code patches for this repo.
-3. If speed is important and you can afford it: run inference on a machine with ≥16 GiB VRAM.
-4. Always set these env vars before importing tokenizer/torch:
+## ✅ Final status & actionable summary
+- Environment: Conda env (Python 3.12) with PyTorch 2.9.x+cu130 installed via pip — PyTorch sees CUDA and the GPU.
+- Code changes: patched launchers, conservative config, sitecustomize + run_with_tqdm_patch to fix tqdm/huggingface_hub mismatch.
+- Diagnostics tooling: gather_vllm_diagnostics.sh and test_vllm_gpt2.py added.
+- Remaining blocker: large multimodal model (DeepSeek‑OCR) needs quantization or larger GPU to reliably finish full initialization and inference on a 6 GiB device.
+
+---
+
+## 🧾 Useful copy‑paste commands
+
+- Kill currently stuck vllm processes (use in another terminal):
 ```bash
-export TOKENIZERS_PARALLELISM=false
-export VLLM_USE_V1=1
-export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:64"
+PIDS=$(ps -eo pid,cmd | egrep 'VLLM::EngineCore|run_one_debug_skip_tokenizer|run_dpsk_ocr|run_one_debug|vllm' | awk '{print $1}' | tr '\n' ' ')
+[ -n "$PIDS" ] && kill $PIDS
+sleep 3
+[ -n "$PIDS" ] && sudo kill -9 $PIDS || true
 ```
 
----
+- Run diagnostics collector (in another terminal):
+```bash
+bash ./gather_vllm_diagnostics.sh
+# archive will be in /tmp/vllm_diag_<timestamp>.tar.gz
+```
 
-## 📦 Useful commands (copy‑friendly)
-
-- Quick PyTorch GPU check:
+- Quick PyTorch check:
 ```bash
 python - <<'PY'
 import torch
 print(torch.__version__, torch.version.cuda)
-print("cuda available:", torch.cuda.is_available())
+print("CUDA available:", torch.cuda.is_available())
 if torch.cuda.is_available():
     print(torch.cuda.get_device_name(0))
 PY
 ```
 
-- Minimal vllm engine config snippet (for launchers):
-```python
-engine_args = AsyncEngineArgs(
-    model=MODEL_PATH,
-    hf_overrides={"architectures": ["DeepseekOCRForCausalLM"]},
-    gpu_memory_utilization=0.05,
-    swap_space=12,
-    skip_tokenizer_init=True,
-)
+- Launch patched image pipeline (example):
+```bash
+export PYTHONPATH="$PWD:$PYTHONPATH"   # ensures sitecustomize.py is loaded by child processes
+python run_with_tqdm_patch.py run_dpsk_ocr_image.py
+# or for single image:
+python run_with_tqdm_patch.py run_one_debug_skip_tokenizer.py /path/to/image.png
 ```
 
 ---
 
-## 📝 TL;DR — one‑line verdict
-If you want stable local runs on a 6 GiB GPU: prefer 8‑bit quantization (bitsandbytes) or accept very slow host swapping; otherwise use a larger GPU (cloud or local). I can prepare the quantization patch or a one‑shot setup script — say the word and I’ll generate it. 😄
+## 📁 Files changed / added (high level)
+- Patched launchers: run_one_debug_skip_tokenizer.py, run_dpsk_ocr_image.py, run_dpsk_ocr_eval_batch.py, run_dpsk_ocr_pdf.py (set envs early, spawn start method, conservative engine args).
+- Config change: config.py (conservative defaults; note tokenizer is still created eagerly — see note below).
+- New helper/diagnostic scripts: run_with_tqdm_patch.py, sitecustomize.py, gather_vllm_diagnostics.sh, test_vllm_gpt2.py.
+- Model code: deepseek_ocr.py and associated modules left functionally intact but recognized as heavy for 6 GiB — quantization hooks available (QuantizationConfig import present).
 
 ---
-If you'd like, I can now:
-- provide a ready patch to enable bitsandbytes quantization in this repo, or
-- produce a small bash script that applies the conservative engine/config changes automatically and runs a monitored test.
-Which would you prefer? 🔧🧪
+
+## ⚠️ Notes & caveats
+- Tokenizer is currently created eagerly inside config.py (AutoTokenizer.from_pretrained). For maximum safety, consider turning that into a lazy loader (get_tokenizer performs cache-lazy loading) to avoid I/O or thread creation at import time.
+- sitecustomize.py must be found by Python in every child interpreter: ensure repo root is in PYTHONPATH before launching any patched script.
+- When installing bitsandbytes or other CUDA-sensitive packages, choose versions compatible with your system CUDA and the wheel builds you use.
