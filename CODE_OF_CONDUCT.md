@@ -1,75 +1,56 @@
-# Contributor Covenant Code of Conduct
+# Contributing
 
-## The Pledge
+👍🎉 Thanks a lot for considering contributing 🎉👍
 
-In the interest of fostering an open and welcoming environment, we as
-contributors and maintainers pledge to making participation in our project and
-our community a harassment-free experience for everyone, regardless of age, body
-size, disability, ethnicity, gender identity and expression, level of experience,
-education, socio-economic status, nationality, personal appearance, race,
-religion, or sexual identity and orientation.  
+The community welcomes and encourages contribution. There is many way to contribute: you can
+write bug report, contribute code or documentation.
 
-## The Standards
+## Working on your first Pull Request?
 
-Examples of behavior that contributes to creating a positive environment
-include:  
+You can learn how from this *free* series
+ [How to Contribute to an Open Source Project on GitHub]
+(<https://egghead.io/series/how-to-contribute-to-an-open-source-project-on-github>)
 
-* Using welcoming and inclusive language
-* Being respectful of differing viewpoints and experiences
-* Gracefully accepting constructive criticism
-* Focusing on what is best for the community
-* Showing empathy towards other community members
+## Reporting issues
 
-Examples of unacceptable behavior by participants include:  
+When reporting issues the more information you can supply the better.
 
-* The use of sexualized language or imagery and unwelcome sexual attention or
-  advances
-* Trolling, insulting/derogatory comments, and personal or political attacks
-* Public or private harassment
-* Publishing others' private information, such as a physical or electronic
-  address, without explicit permission
-* Other conduct which could reasonably be considered inappropriate in a
-  professional setting
+If it is an issue with building the LaTeX package, indicate your
+ environment like operating system and,
+ version of MikTeX your are using.
 
-## The Responsibilities
+## Improvements request and proposal
 
-Project maintainer are responsible for clarifying the standards of acceptable
-behavior and are expected to take appropriate and fair corrective action in
-response to any instances of unacceptable behavior.  
+Feel free to make an issue to request a new functionality.
 
-Project maintainer have the right and responsibility to remove, edit, or
-reject comments, commits, code, wiki edits, issues, and other contributions
-that are not aligned to this Code of Conduct, or to ban temporarily or
-permanently any contributor for other behaviors that they deem inappropriate,
-threatening, offensive, or harmful.  
+## Contributing code/Pull-Request
 
-## Scope
+The community welcomes contribution, this can be done by starting a pull-request.
+You can contribute by updating the package content or styling, code (
+.cls file), or both.
 
-This Code of Conduct applies both within project spaces and in public spaces
-when an individual is representing the project or its community. Examples of
-representing a project or community include using an official project e-mail
-address, posting via an official social media account, or acting as an appointed
-representative at an online or offline event. Representation of a project may be
-further defined and clarified by project maintainer.  
+### Contributing content or styling
 
-## Enforcement
+There is a couple of basic requirement for us to merge the pull request:
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported by contacting <f.rombaldoni@campus.uniurb.it>. All
-complaints will be reviewed and investigated and will result in a response that
-is deemed necessary and appropriate to the circumstances. The project team is
-obligated to maintain confidentiality with regard to the reporter of an incident.
-Further details of specific enforcement policies may be posted separately.  
+- The styling should maintain the compatibility with previous versions.
+ For example, if you plan to add a new number to the contact information,
+ it should be optional and not mandatory allowing not to change anything
+ to the other users of the package.
 
-Project maintainer who do not follow or enforce the Code of Conduct in good
-faith may face temporary or permanent repercussions as determined by other
-members of the project's leadership.  
+### Contributing code
 
-## Attribution
+If the change is big, typically if the change span to more than one file,
+ consider starting an issue first to discuss the improvement.
+ This will makes it much easier to make the change fit well into the package.
 
-This Code of Conduct is adapted from the [Contributor Covenant][homepage],
-version 1.4,  
-available at
-<https://www.contributor-covenant.org/version/1/4/code-of-conduct.html>  
+There is some basic requirement for us to merge a pull request:
 
-[homepage]: <https://www.contributor-covenant.org>
+- Describe the change
+- Refer to any issues it effects
+- Separate one pull request per functionality: if you start writing "and"
+ in the feature description consider if it could be separated in two pull requests.
+
+In your code:
+
+- Make sure the coding style of your code follows the style of the file.
